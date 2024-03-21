@@ -39,7 +39,7 @@ from collections import defaultdict
 from PIL.PngImagePlugin import PngInfo
 from PIL import Image, ImageDraw, ImageFont
 from comfy.model_patcher import ModelPatcher
-from comfy_extras.chainner_models import model_loading
+from spandrel import ModelLoader, ImageModelDescriptor
 from typing import Dict, List, Optional, Tuple, Union, Any
 from .adv_encode import advanced_encode, advanced_encode_XL
 
@@ -3067,7 +3067,7 @@ class ttN_modelScale:
         # Load Model
         model_path = folder_paths.get_full_path("upscale_models", model_name)
         sd = comfy.utils.load_torch_file(model_path, safe_load=True)
-        upscale_model = model_loading.load_state_dict(sd).eval()
+        upscale_model = ModelLoader().load_from_state_dict(sd).eval()
 
         # Model upscale
         device = comfy.model_management.get_torch_device()
@@ -3079,7 +3079,7 @@ class ttN_modelScale:
         steps = in_img.shape[0] * comfy.utils.get_tiled_scale_steps(in_img.shape[3], in_img.shape[2], tile_x=tile, tile_y=tile, overlap=overlap)
         pbar = comfy.utils.ProgressBar(steps)
         s = comfy.utils.tiled_scale(in_img, lambda a: upscale_model(a), tile_x=tile, tile_y=tile, overlap=overlap, upscale_amount=upscale_model.scale, pbar=pbar)
-        upscale_model.cpu()
+        upscale_model.to("cpu")
         s = torch.clamp(s.movedim(-3,-1), min=0, max=1.0)
 
         # Post Model Rescale
