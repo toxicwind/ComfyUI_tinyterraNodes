@@ -199,14 +199,21 @@ function widgetLogic(node, widget) {
 						toggleWidget(node, findWidgetByName(node, 'height'), true)
 						toggleWidget(node, findWidgetByName(node, 'factor'))
 						toggleWidget(node, findWidgetByName(node, 'crop'))
-					} else {
+					} else if (rescale?.value === 'to Width/Height') {
 						toggleWidget(node, findWidgetByName(node, 'percent'))
 						toggleWidget(node, findWidgetByName(node, 'longer_side'), true)
 						toggleWidget(node, findWidgetByName(node, 'width'))
 						toggleWidget(node, findWidgetByName(node, 'height'))
 						toggleWidget(node, findWidgetByName(node, 'factor'))
 						toggleWidget(node, findWidgetByName(node, 'crop'))
-					}
+                    } else {
+						toggleWidget(node, findWidgetByName(node, 'percent'))
+						toggleWidget(node, findWidgetByName(node, 'longer_side'))
+						toggleWidget(node, findWidgetByName(node, 'width'))
+						toggleWidget(node, findWidgetByName(node, 'height'))
+						toggleWidget(node, findWidgetByName(node, 'factor'))
+						toggleWidget(node, findWidgetByName(node, 'crop'))                        
+                    }
 					toggleWidget(node, findWidgetByName(node, 'upscale_model_name'), true)
 				} else {
 					toggleWidget(node, findWidgetByName(node, 'upscale_model_name'))
@@ -228,12 +235,19 @@ function widgetLogic(node, widget) {
 				toggleWidget(node, findWidgetByName(node, 'embed_workflow'))
 				toggleWidget(node, findWidgetByName(node, 'number_padding'))
 				toggleWidget(node, findWidgetByName(node, 'overwrite_existing'))
+                toggleWidget(node, findWidgetByName(node, 'file_type'))
 			} else if (['Save', 'Hide/Save', 'Disabled'].includes(widget.value)) {
 				toggleWidget(node, findWidgetByName(node, 'save_prefix'), true)
 				toggleWidget(node, findWidgetByName(node, 'output_path'), true)
-				toggleWidget(node, findWidgetByName(node, 'embed_workflow'), true)
 				toggleWidget(node, findWidgetByName(node, 'number_padding'), true)
 				toggleWidget(node, findWidgetByName(node, 'overwrite_existing'), true)
+                toggleWidget(node, findWidgetByName(node, 'file_type'), true)
+                const fileTypeValue = findWidgetByName(node, 'file_type')?.value
+                if (fileTypeValue === 'png') {
+                    toggleWidget(node, findWidgetByName(node, 'embed_workflow'), true)
+                } else {
+                    toggleWidget(node, findWidgetByName(node, 'embed_workflow'))
+                }
 			}
 			break;
 
@@ -296,7 +310,7 @@ function widgetLogic(node, widget) {
 			break;
 
 		case 'mode':
-			let number_to_show2 = findWidgetByName(node, 'num_loras').value + 1
+			let number_to_show2 = findWidgetByName(node, 'num_loras')?.value + 1
 			for (let i = 0; i < number_to_show2; i++) {
 				if (widget.value === "simple") {
 					toggleWidget(node, findWidgetByName(node, 'lora_'+i+'_strength'), true)
@@ -359,7 +373,78 @@ function widgetLogic(node, widget) {
             if (widget.value == 'Hold') {
                 findWidgetByName(node, 'control_after_generate').value = 'fixed'
             }
+            break;
 
+        case 'print_to_console':
+            if (widget.value == false) {
+                toggleWidget(node, findWidgetByName(node, 'console_title'))
+                toggleWidget(node, findWidgetByName(node, 'console_color'))
+            } else {
+                toggleWidget(node, findWidgetByName(node, 'console_title'), true)
+                toggleWidget(node, findWidgetByName(node, 'console_color'), true)
+            }
+            break;
+
+        case 'sampling':
+            if (widget.value == 'Default') {
+                toggleWidget(node, findWidgetByName(node, 'zsnr'))
+            } else {
+                toggleWidget(node, findWidgetByName(node, 'zsnr'), true)
+            }
+            break;
+        
+        case 'range_mode':
+            function setWidgetOptions(widget, options) {
+                widget.options.step = options.step;
+                widget.options.round = options.round;
+                widget.options.precision = options.precision;
+            }
+
+            if (widget.value.startsWith('step')) {
+                toggleWidget(node, findWidgetByName(node, 'stop'))
+                toggleWidget(node, findWidgetByName(node, 'step'), true)
+                toggleWidget(node, findWidgetByName(node, 'include_stop'))
+            } else {
+                toggleWidget(node, findWidgetByName(node, 'stop'), true)
+                toggleWidget(node, findWidgetByName(node, 'step'))
+                toggleWidget(node, findWidgetByName(node, 'include_stop'), true)
+            }
+            if (widget.value.endsWith('int')) {
+                const intOptions = {
+                    step: 10,
+                    round: 1,
+                    precision: 0
+                  };
+                const start_widget = findWidgetByName(node, 'start')
+                const stop_widget = findWidgetByName(node, 'stop')
+                const step_widget = findWidgetByName(node, 'step')
+                setWidgetOptions(start_widget, intOptions);
+                setWidgetOptions(stop_widget, intOptions);
+                setWidgetOptions(step_widget, intOptions);
+
+            } else {
+                const floatOptions = {
+                    step: 0.1,
+                    round: 0.01,
+                    precision: 2
+                  };
+                const start_widget = findWidgetByName(node, 'start')
+                const stop_widget = findWidgetByName(node, 'stop')
+                const step_widget = findWidgetByName(node, 'step')
+                setWidgetOptions(start_widget, floatOptions);
+                setWidgetOptions(stop_widget, floatOptions);
+                setWidgetOptions(step_widget, floatOptions);
+            }
+            break;
+
+        case 'file_type':
+            const imageOutputValue = findWidgetByName(node, 'image_output').value
+            if (widget.value == 'png' && ['Save', 'Hide/Save', 'Disabled'].includes(imageOutputValue)) {
+                toggleWidget(node, findWidgetByName(node, 'embed_workflow'), true)
+            } else {
+                toggleWidget(node, findWidgetByName(node, 'embed_workflow'))
+            }
+            break;
 	}
 }
 
@@ -368,7 +453,30 @@ const getSetWidgets = ['rescale_after_model', 'rescale', 'image_output',
 						'refiner_lora1_name', 'refiner_lora2_name', 'refiner_steps', 'upscale_method', 
 						'image_output', 'add_noise', 
 						'ckpt_B_name', 'ckpt_C_name', 'save_model', 'refiner_ckpt_name',
-						'num_loras', 'mode', 'toggle', 'empty_latent_aspect', 'conditioning_aspect', 'target_aspect', 'sampler_state']
+						'num_loras', 'mode', 'toggle', 'empty_latent_aspect', 'conditioning_aspect', 'target_aspect', 'sampler_state',
+                        'print_to_console', 'sampling', 'range_mode', 'file_type']
+const getSetTitles = [
+    "hiresfixScale",
+    "pipeLoader",
+    "pipeLoader v1 (Legacy)",
+    "pipeLoaderSDXL",
+    "pipeLoaderSDXL v1 (Legacy)",
+    "pipeKSampler",
+    "pipeKSampler v1 (Legacy)",
+    "pipeKSamplerAdvanced",
+    "pipeKSamplerAdvanced v1 (Legacy)",
+    "pipeKSamplerSDXL",
+    "pipeKSamplerSDXL v1 (Legacy)",
+    "imageRemBG",
+    "imageOutput",
+    "multiModelMerge",
+    "pipeLoraStack",
+    "pipeEncodeConcat",
+    "tinyKSampler",
+    "debugInput",
+    "tinyLoader",
+    "advPlot range"
+];
 
 function getSetters(node) {
 	if (node.widgets)
@@ -398,27 +506,7 @@ app.registerExtension({
 	
 	nodeCreated(node) {
 		const nodeTitle = node.getTitle();
-		const titles = [
-			"hiresfixScale",
-			"pipeLoader",
-			"pipeLoader v1 (Legacy)",
-			"pipeLoaderSDXL",
-			"pipeLoaderSDXL v1 (Legacy)",
-			"pipeKSampler",
-			"pipeKSampler v1 (Legacy)",
-			"pipeKSamplerAdvanced",
-            "pipeKSamplerAdvanced v1 (Legacy)",
-			"pipeKSamplerSDXL",
-			"pipeKSamplerSDXL v1 (Legacy)",
-			"imageRemBG",
-			"imageOutput",
-			"multiModelMerge",
-			"pipeLoraStack",
-			"pipeEncodeConcat",
-            "ttN KSampler",
-		];
-	
-		if (titles.includes(nodeTitle)) {
+		if (getSetTitles.includes(nodeTitle)) {
 			getSetters(node);
 		}
 	}
