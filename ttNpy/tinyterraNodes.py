@@ -59,6 +59,7 @@ from nodes import NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS
 >>>>>>> upstream/main
 
 from .utils import CC, ttNl, ttNpaths, AnyType
+from .ttNexecutor import xyExecutor
 
 class ttNloader:
     def __init__(self):
@@ -445,18 +446,14 @@ class ttNsampler:
         )
 
 class ttNadv_xyPlot:
-    def __init__(self, adv_xyPlot, unique_id, prompt, extra_pnginfo, save_prefix, image_output):
+    def __init__(self, adv_xyPlot, unique_id, prompt, extra_pnginfo, save_prefix, image_output, executor):
+        self.executor = executor
         self.unique_id = str(unique_id)
         self.prompt = prompt
         self.extra_pnginfo = extra_pnginfo 
         self.save_prefix = save_prefix
         self.image_output = image_output
 
-        self.outputs = {}
-        self.outputs_ui = {}
-        self.object_storage = {}
-
-        self.results = {}
         self.latent_list = []
         self.image_list = []
         self.ui_list = []
@@ -476,6 +473,13 @@ class ttNadv_xyPlot:
 
         self.num = 0
         self.total = (self.num_cols if self.num_cols > 0 else 1) * (self.num_rows if self.num_rows > 0 else 1)
+
+    def reset(self):
+        self.executor.reset()
+        self.executor = None
+        self.latent_list = []
+        self.image_list = []
+        self.ui_list = []
 
     @staticmethod
     def get_font(font_size):
@@ -580,6 +584,17 @@ class ttNadv_xyPlot:
     def getRelevantPrompt(self):
         nodes_to_keep = self._getNodesToKeep(self.unique_id, self.prompt)
         new_prompt = {node_id: self.prompt[node_id] for node_id in nodes_to_keep}
+        
+        if self.save_individuals == True:
+            if self.image_output in ["Hide", "Hide/Save"]:
+                new_prompt[self.unique_id]["inputs"]["image_output"] = "Hide/Save"
+            else:
+                new_prompt[self.unique_id]["inputs"]["image_output"] = "Save"          
+        elif self.image_output in ["Preview", "Save"]:
+            new_prompt[self.unique_id]["inputs"]["image_output"] = "Preview"
+        else:
+            new_prompt[self.unique_id]["inputs"]["image_output"] = "Hide"
+            
         return new_prompt
 
     def plot_images(self):
@@ -626,104 +641,28 @@ class ttNadv_xyPlot:
             return int(initial_font_size * (label_width / text_width) * scaling_factor)
         else:
             return initial_font_size
-        
-    def execute_node(self, unique_id, prompt, object_storage, extra_data):
-        inputs = prompt[str(unique_id)]["inputs"]
-        class_type = prompt[str(unique_id)]["class_type"]
-        if class_type == "ttN advanced xyPlot":
-            class_def = ttN_Plotting    #Fake class to avoid recursive execute of xy_plot node
-        else:
-            class_def = COMFY_CLASS_MAPPINGS[class_type]
-
-        for x in inputs:
-            input_data = inputs[x]
-
-            if isinstance(input_data, list):
-                input_unique_id = input_data[0]
-                output_index = input_data[1]
-                if input_unique_id not in self.outputs:
-                    if input_unique_id not in prompt:
-                        input_data = None
-                    else:
-                        self.outputs = self.execute_node(input_unique_id, prompt, object_storage, extra_data)
-
-                input_data = self.outputs[input_unique_id][output_index]
-
-        input_data_all = None
-        try:
-            input_data_all = execution.get_input_data(inputs, class_def, unique_id, self.outputs, prompt, extra_data)
-
-            obj = object_storage.get((unique_id, class_type), None)
-            if obj is None:
-                obj = class_def()
-                object_storage[(unique_id, class_type)] = obj
-
-            output_data, output_ui = execution.get_output_data(obj, input_data_all)
-            self.outputs[unique_id] = output_data
-            self.outputs_ui[unique_id] = output_ui
-        except comfy.model_management.InterruptProcessingException as iex:
-            logging.info("Processing interrupted")
-            raise iex
-
-        return self.outputs
     
-    def execute_prompt(self, prompt, extra_data, xpoint, ypoint, x_label, y_label):
-        if self.save_individuals == True:
-            if self.image_output in ["Hide", "Hide/Save"]:
-                prompt[self.unique_id]["inputs"]["image_output"] = "Hide/Save"
-            else:
-                prompt[self.unique_id]["inputs"]["image_output"] = "Save"
-                
-        elif self.image_output in ["Preview", "Save"]:
-            prompt[self.unique_id]["inputs"]["image_output"] = "Preview"
-        else:
-            prompt[self.unique_id]["inputs"]["image_output"] = "Hide"
-            
-        self.num += 1
-        ttNl(f'{CC.GREY}X: {x_label}, Y: {y_label}').t(f'Plot Values {self.num}/{self.total} ->').p()
+    def execute_prompt(self, prompt, extra_data, x_label, y_label):
+        valid = execution.validate_prompt(prompt)
         
-        with torch.inference_mode():
-            #delete cached outputs if nodes don't exist for them
-            to_delete = []
-            for o in self.outputs:
-                if o not in prompt:
-                    to_delete += [o]
-            for o in to_delete:
-                d = self.outputs.pop(o)
-                d2 = self.outputs_ui.pop(o)
-                del d
-                del d2
-            to_delete = []
-            for o in self.object_storage:
-                if o[0] not in prompt:
-                    to_delete += [o]
-                else:
-                    p = prompt[o[0]]
-                    if o[1] != p['class_type']:
-                        to_delete += [o]
-            for o in to_delete:
-                d = self.object_storage.pop(o)
-                del d
-                
-            comfy.model_management.cleanup_models(keep_clone_weights_loaded=True)
+        if valid[0]:
+            ttNl(f'{CC.GREY}X: {x_label}, Y: {y_label}').t(f'Plot Values {self.num}/{self.total} ->').p()
 
-            for node_id in prompt:
-                self.execute_node(node_id, prompt, self.object_storage, extra_data)
+            self.executor.execute(prompt, self.num, extra_data, valid[2])
 
-            if comfy.model_management.DISABLE_SMART_MEMORY:
-                comfy.model_management.unload_all_models()
+            self.latent_list.append(self.executor.outputs[self.unique_id][-6][0]["samples"])
+            #ui_out = self.executor.outputs_ui[self.unique_id].get('images')
+            #if ui_out is not None and len(ui_out) > 0:
+            #    self.ui_list.append(ui_out[0])
 
-        self.latent_list.append(self.outputs[self.unique_id][-6][0]["samples"])
-        ui_out = self.outputs_ui[self.unique_id].get('images')
-        if ui_out is not None and len(ui_out) > 0:
-            self.ui_list.append(ui_out[0])
+            image = self.executor.outputs[self.unique_id][-3][0]
+            pil_image = ttNsampler.tensor2pil(image)
+            self.image_list.append(pil_image)
 
-        image = self.outputs[self.unique_id][-3][0]
-        pil_image = ttNsampler.tensor2pil(image)
-        self.image_list.append(pil_image)
-
-        self.max_width = max(self.max_width, pil_image.width)
-        self.max_height = max(self.max_height, pil_image.height)
+            self.max_width = max(self.max_width, pil_image.width)
+            self.max_height = max(self.max_height, pil_image.height)
+        else:
+            raise Exception(valid[1])
 
     @staticmethod
     def _parse_value(input_name, value, node_inputs, input_types, regex):
@@ -756,13 +695,14 @@ class ttNadv_xyPlot:
                             value = False
                         value = bool(value)
         return input_name, value
-        
+  
     def xy_plot_process(self):
         if self.x_points is None and self.y_points is None:
             return None, None, None, None
 
         regex = re.compile(r'%(.*?);(.*?)%')
-        
+
+        x_label, y_label = None, None
         base_prompt = self.getRelevantPrompt()    
 
         for xpoint, nodes in self.x_points.items():
@@ -805,32 +745,35 @@ class ttNadv_xyPlot:
                         for input_name, value in inputs.items():
                             input_name, value = self._parse_value(input_name, value, y_node_inputs, y_input_types, regex)
                             y_node_inputs[input_name] = value
-
-                    self.execute_prompt(y_prompt, self.extra_pnginfo, xpoint, ypoint, x_label, y_label)
+                            
+                    self.num += 1
+                    self.execute_prompt(y_prompt, self.extra_pnginfo, x_label, y_label)
             else:
-                self.execute_prompt(x_prompt, self.extra_pnginfo, xpoint, "1", x_label, None)
+                self.num += 1
+                self.execute_prompt(x_prompt, self.extra_pnginfo, x_label, y_label)
 
         # Rearrange latent array to match preview image grid
         self.latent_list = self.rearrange_tensors(self.latent_list, self.num_cols, self.num_rows)
-        rearranged_image_list = self.rearrange_tensors(self.image_list, self.num_cols, self.num_rows)
 
-        if self.image_output in ["Preview", "Save"]:
-            rearranged_ui_list = self.rearrange_tensors(self.ui_list, self.num_cols, self.num_rows)
-        else:
-            rearranged_ui_list = []
+        #if self.image_output in ["Preview", "Save"]:
+        #    rearranged_ui_list = self.rearrange_tensors(self.ui_list, self.num_cols, self.num_rows)
+        #else:
+        #    rearranged_ui_list = []
 
         # Concatenate the tensors along the first dimension (dim=0)
         self.latent_list = torch.cat(self.latent_list, dim=0)
         plot_image = self.plot_images()
 
+        self.image_list = self.rearrange_tensors(self.image_list, self.num_cols, self.num_rows)
+
         images = []
-        for image in rearranged_image_list:
+        for image in self.image_list:
             images.append(sampler.pil2tensor(image))
 
         images_out = torch.cat(images, dim=0)
         samples = {"samples": self.latent_list}
         
-        return plot_image, images_out, samples, rearranged_ui_list
+        return plot_image, images_out, samples
 
 class ttNsave:
     def __init__(self, my_unique_id=0, prompt=None, extra_pnginfo=None, number_padding=5, overwrite_existing=False, output_dir=folder_paths.get_temp_directory()):
@@ -1119,7 +1062,7 @@ class ttN_pipeLoader_v2:
                     "model_override": ("MODEL",), 
                     "clip_override": ("CLIP",), 
                     "optional_lora_stack": ("LORA_STACK",),
-                    "optional_controlnet_stack": ("CONTROLNET_STACK",),
+                    "optional_controlnet_stack": ("CONTROL_NET_STACK",),
                     "prepend_positive": ("STRING", {"default": None, "forceInput": True}),
                     "prepend_negative": ("STRING", {"default": None, "forceInput": True}),
                     },
@@ -1280,7 +1223,7 @@ class ttN_pipeKSampler_v2:
                 if (samp_images is None):
                     samp_images = samp_vae.decode(samp_samples["samples"])
                 hiresfix = ttN_modelScale()
-                samp_samples = hiresfix.upscale(upscale_model_name, samp_images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True, samp_vae)
+                samp_samples = hiresfix.upscale(upscale_model_name, samp_vae, samp_images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True)
 
             samp_samples = sampler.common_ksampler(samp_model, samp_seed, steps, cfg, sampler_name, scheduler, samp_positive, samp_negative, samp_samples, denoise=denoise, preview_latent=preview_latent, start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise, disable_noise=disable_noise)
       
@@ -1318,8 +1261,11 @@ class ttN_pipeKSampler_v2:
 
             random.seed(seed)
 
-            plotter = ttNadv_xyPlot(adv_xyPlot, my_unique_id, prompt, extra_pnginfo, save_prefix, image_output)
-            plot_image, images, samples, ui_results = plotter.xy_plot_process()
+            executor = xyExecutor()
+            plotter = ttNadv_xyPlot(adv_xyPlot, my_unique_id, prompt, extra_pnginfo, save_prefix, image_output, executor)
+            plot_image, images, samples = plotter.xy_plot_process()
+            plotter.reset()
+            del executor, plotter
 
             if samples is None and images is None:
                 return process_sample_state(samp_model, samp_images, samp_clip, samp_samples, samp_vae, samp_seed, samp_positive, samp_negative, lora_name, lora_model_strength, lora_clip_strength,
@@ -1329,7 +1275,7 @@ class ttN_pipeKSampler_v2:
 
 
             plot_result = ttN_save.images(plot_image, save_prefix, image_output, embed_workflow, file_type)
-            plot_result.extend(ui_results)
+            #plot_result.extend(ui_results)
 
             new_pipe = {
                 "model": samp_model,
@@ -1519,7 +1465,7 @@ class ttN_pipeLoaderSDXL_v2:
                     "model_override": ("MODEL",),
                     "clip_override": ("CLIP",),
                     "optional_lora_stack": ("LORA_STACK",),
-                    "optional_controlnet_stack": ("CONTROLNET_STACK",),
+                    "optional_controlnet_stack": ("CONTROL_NET_STACK",),
                     "refiner_model_override": ("MODEL",),
                     "refiner_clip_override": ("CLIP",),
                     "prepend_positive_g": ("STRING", {"default": None, "forceInput": True}),
@@ -1734,7 +1680,7 @@ class ttN_pipeKSamplerSDXL_v2:
                 if (sdxl_images is None):
                     sdxl_images = sdxl_vae.decode(sdxl_samples["samples"])
                 hiresfix = ttN_modelScale()
-                sdxl_samples = hiresfix.upscale(upscale_model_name, sdxl_images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True, sdxl_vae)
+                sdxl_samples = hiresfix.upscale(upscale_model_name, sdxl_vae, sdxl_images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True)
 
 
             if (refiner_steps > 0) and (sdxl_refiner_model not in [None, "None"]):
@@ -1799,9 +1745,12 @@ class ttN_pipeKSamplerSDXL_v2:
                            image_output, save_prefix, file_type, embed_workflow, prompt, extra_pnginfo, my_unique_id, preview_latent, adv_xyPlot):
 
             random.seed(seed)
-
-            plotter = ttNadv_xyPlot(adv_xyPlot, my_unique_id, prompt, extra_pnginfo, save_prefix, image_output)
-            plot_image, images, samples, ui_results = plotter.xy_plot_process()
+            
+            executor = xyExecutor()
+            plotter = ttNadv_xyPlot(adv_xyPlot, my_unique_id, prompt, extra_pnginfo, save_prefix, image_output, executor)
+            plot_image, images, samples = plotter.xy_plot_process()
+            plotter.reset()
+            del executor, plotter
 
             if samples is None and images is None:
                 return process_sample_state(sdxl_model, sdxl_images, sdxl_clip, sdxl_samples, sdxl_vae, sdxl_seed, sdxl_positive, sdxl_negative, lora_name, lora_model_strength, lora_clip_strength,
@@ -1812,7 +1761,7 @@ class ttN_pipeKSamplerSDXL_v2:
 
 
             plot_result = ttN_save.images(plot_image, save_prefix, image_output, embed_workflow, file_type)
-            plot_result.extend(ui_results)
+            #plot_result.extend(ui_results)
 
             new_sdxl_pipe = {
                 "model": sdxl_model,
@@ -2395,7 +2344,7 @@ class ttN_KSampler_v2:
                 if (images is None):
                     images = vae.decode(samples["samples"])
                 hiresfix = ttN_modelScale()
-                samples = hiresfix.upscale(upscale_model_name, images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True, vae)
+                samples = hiresfix.upscale(upscale_model_name, vae, images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True)
 
             samples = sampler.common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, samples, denoise=denoise, preview_latent=preview_latent, start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise, disable_noise=disable_noise)
       
@@ -2418,9 +2367,12 @@ class ttN_KSampler_v2:
                            image_output, save_prefix, file_type, embed_workflow, prompt, extra_pnginfo, my_unique_id, preview_latent, adv_xyPlot):
 
             random.seed(seed)
-
-            plotter = ttNadv_xyPlot(adv_xyPlot, my_unique_id, prompt, extra_pnginfo, save_prefix, image_output)
-            plot_image, images, samples, ui_results = plotter.xy_plot_process()
+            
+            executor = xyExecutor()
+            plotter = ttNadv_xyPlot(adv_xyPlot, my_unique_id, prompt, extra_pnginfo, save_prefix, image_output, executor)
+            plot_image, images, samples = plotter.xy_plot_process()
+            plotter.reset()
+            del executor, plotter
 
             if samples is None and images is None:
                 return process_sample_state(model, images, clip, samples, vae, seed, positive, negative, lora_name, lora_model_strength, lora_clip_strength,
@@ -2430,7 +2382,7 @@ class ttN_KSampler_v2:
 
 
             plot_result = ttN_save.images(plot_image, save_prefix, image_output, embed_workflow, file_type)
-            plot_result.extend(ui_results)
+            #plot_result.extend(ui_results)
 
             if image_output in ("Hide", "Hide/Save"):
                 return (model, positive, negative, samples, vae, clip, images, seed, plot_image)
@@ -3246,13 +3198,14 @@ class ttN_imageOUPUT:
                 "result": (image,)}
 
 class ttN_modelScale:
-    version = '1.0.3'
+    version = '1.1.0'
     upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos", "bislerp"]
     crop_methods = ["disabled", "center"]
 
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "model_name": (folder_paths.get_filename_list("upscale_models"),),
+                              "vae": ("VAE",),
                               "image": ("IMAGE",),
                               "rescale_after_model": ([False, True],{"default": True}),
                               "rescale_method": (s.upscale_methods,),
@@ -3264,8 +3217,7 @@ class ttN_modelScale:
                               "crop": (s.crop_methods,),
                               "image_output": (["Hide", "Preview", "Save", "Hide/Save"],),
                               "save_prefix": ("STRING", {"default": "ComfyUI"}),
-                              "output_latent": ([False, True],{"default": True}),
-                              "vae": ("VAE",),},
+                              "output_latent": ([False, True],{"default": True}),},
                 "hidden": {   "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "my_unique_id": "UNIQUE_ID",
                                "ttNnodeVersion": ttN_modelScale.version},
         }
@@ -3286,7 +3238,7 @@ class ttN_modelScale:
             pixels = pixels[:, x_offset:x + x_offset, y_offset:y + y_offset, :]
         return pixels
 
-    def upscale(self, model_name, image, rescale_after_model, rescale_method, rescale, percent, width, height, longer_side, crop, image_output, save_prefix, output_latent, vae, prompt=None, extra_pnginfo=None, my_unique_id=None):
+    def upscale(self, model_name, vae, image, rescale_after_model, rescale_method, rescale, percent, width, height, longer_side, crop, image_output, save_prefix, output_latent, prompt=None, extra_pnginfo=None, my_unique_id=None):
         # Load Model
         model_path = folder_paths.get_full_path("upscale_models", model_name)
         sd = comfy.utils.load_torch_file(model_path, safe_load=True)
