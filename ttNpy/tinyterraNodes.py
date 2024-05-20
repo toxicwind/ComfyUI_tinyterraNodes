@@ -48,16 +48,8 @@ from comfy.sd import CLIP, VAE
 from comfy.cli_args import args
 from .adv_encode import advanced_encode
 from comfy.model_patcher import ModelPatcher
-<<<<<<< HEAD
 from spandrel import ModelLoader, ImageModelDescriptor
-from typing import Dict, List, Optional, Tuple, Union, Any
 from .adv_encode import advanced_encode, advanced_encode_XL
-=======
-from comfy_extras.chainner_models import model_loading
-from nodes import MAX_RESOLUTION, ControlNetApplyAdvanced
-from nodes import NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS
->>>>>>> upstream/main
-
 from .utils import CC, ttNl, ttNpaths, AnyType
 from .ttNexecutor import xyExecutor
 
