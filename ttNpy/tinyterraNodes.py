@@ -2,7 +2,7 @@
 @author: tinyterra
 @title: tinyterraNodes
 @nickname: 🌏
-@description: This extension offers various pipe nodes, fullscreen image viewer based on node history, dynamic widgets, interface customization, and more.
+@description: This extension offers extensive xyPlot, various pipe nodes, fullscreen image viewer based on node history, dynamic widgets, interface customization, and more.
 """
 
 #---------------------------------------------------------------------------------------------------------------------------------------------------#
@@ -11,17 +11,21 @@
 # Like the pack and want to support me?                     https://www.buymeacoffee.com/tinyterra                                                  #
 #---------------------------------------------------------------------------------------------------------------------------------------------------#
 
-ttN_version = '1.2.0'
+ttN_version = '2.0.2'
 
 MAX_RESOLUTION=8192
 OUTPUT_FILETYPES = ["png", "jpg", "jpeg", "tiff", "tif", "webp", "bmp"]
+UPSCALE_METHODS = ["None",
+                    "[latent] nearest-exact", "[latent] bilinear", "[latent] area", "[latent] bicubic", "[latent] lanczos", "[latent] bislerp",
+                    "[hiresFix] nearest-exact", "[hiresFix] bilinear", "[hiresFix] area", "[hiresFix] bicubic", "[hiresFix] lanczos", "[hiresFix] bislerp"]
+CROP_METHODS = ["disabled", "center"]
+CUSTOM_SCHEDULERS = ["AYS SD1", "AYS SDXL", "AYS SVD"]
 
 import os
 import re
 import json
 import copy
 import random
-import logging
 import datetime
 from pathlib import Path
 from urllib.request import urlopen
@@ -45,11 +49,18 @@ import comfy.controlnet
 import comfy.model_management
 import comfy_extras.nodes_model_advanced
 from comfy.sd import CLIP, VAE
-from comfy.cli_args import args
 from .adv_encode import advanced_encode
 from comfy.model_patcher import ModelPatcher
+<<<<<<< HEAD
 from spandrel import ModelLoader, ImageModelDescriptor
 from .adv_encode import advanced_encode, advanced_encode_XL
+=======
+from comfy_extras.chainner_models import model_loading
+from comfy_extras.nodes_align_your_steps import AlignYourStepsScheduler
+from nodes import MAX_RESOLUTION, ControlNetApplyAdvanced
+from nodes import NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS
+
+>>>>>>> upstream/main
 from .utils import CC, ttNl, ttNpaths, AnyType
 from .ttNexecutor import xyExecutor
 
@@ -262,8 +273,6 @@ class ttNloader:
         cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
         conditioning = [[cond, {"pooled_output": pooled, "width": width, "height": height, "crop_w": crop_width, "crop_h": crop_height, "target_width": target_width, "target_height": target_height}]]
 
-
-            
         return conditioning, refiner_conditioning
         
     def load_main3(self, ckpt_name, config_name, vae_name, loras, clip_skip, model_override=None, clip_override=None, optional_lora_stack=None):
@@ -349,7 +358,6 @@ class ttNsampler:
         return latent
 
     def common_ksampler(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent, denoise=1.0, disable_noise=False, start_step=None, last_step=None, force_full_denoise=False, preview_latent=True, disable_pbar=False):
-        device = comfy.model_management.get_torch_device()
         latent_image = latent["samples"]
 
         if disable_noise:
@@ -362,26 +370,24 @@ class ttNsampler:
         if "noise_mask" in latent:
             noise_mask = latent["noise_mask"]
 
-        preview_format = "JPEG"
-        if preview_format not in ["JPEG", "PNG"]:
-            preview_format = "JPEG"
-
-        previewer = False
-
         if preview_latent:
-            previewer = latent_preview.get_previewer(device, model.model.latent_format)  
+            callback = latent_preview.prepare_callback(model, steps)
+        else:
+            callback = None
 
-        pbar = comfy.utils.ProgressBar(steps)
-        def callback(step, x0, x, total_steps):
-            preview_bytes = None
-            if previewer:
-                preview_bytes = previewer.decode_latent_to_preview_image(preview_format, x0)
-            pbar.update_absolute(step + 1, total_steps, preview_bytes)
+        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
 
-        samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
-                                    denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
-                                    force_full_denoise=force_full_denoise, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=seed)
-        
+        if scheduler not in CUSTOM_SCHEDULERS:
+            samples = comfy.sample.sample(model, noise, steps, cfg, sampler_name, scheduler, positive, negative, latent_image,
+                                        denoise=denoise, disable_noise=disable_noise, start_step=start_step, last_step=last_step,
+                                        force_full_denoise=force_full_denoise, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=seed)
+        else:
+            sampler = comfy.samplers.sampler_object(sampler_name)
+            model_type = scheduler.split(' ')[1]
+            sigmas = AlignYourStepsScheduler().get_sigmas(model_type, steps, denoise)[0]
+            
+            samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, latent_image, noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=seed)
+
         out = latent.copy()
         out["samples"] = samples
         return out
@@ -690,7 +696,7 @@ class ttNadv_xyPlot:
   
     def xy_plot_process(self):
         if self.x_points is None and self.y_points is None:
-            return None, None, None, None
+            return None, None, None,
 
         regex = re.compile(r'%(.*?);(.*?)%')
 
@@ -1008,7 +1014,7 @@ sampler = ttNsampler()
 
 #---------------------------------------------------------------ttN/pipe START----------------------------------------------------------------------#
 class ttN_pipeLoader_v2:
-    version = '2.0.0'
+    version = '2.1.0'
     @classmethod
     def INPUT_TYPES(cls):
         aspect_ratios = ["width x height [custom]",
@@ -1048,6 +1054,7 @@ class ttN_pipeLoader_v2:
                         "empty_latent_aspect": (aspect_ratios, {"default":"512 x 512 [S] 1:1"}),
                         "empty_latent_width": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                         "empty_latent_height": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                        "batch_size": ("INT", {"default": 1, "min": 1, "max": 64}),
                         "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                         },                
                 "optional": {
@@ -1070,7 +1077,7 @@ class ttN_pipeLoader_v2:
                        loras,
                        positive, positive_token_normalization, positive_weight_interpretation, 
                        negative, negative_token_normalization, negative_weight_interpretation, 
-                       empty_latent_aspect, empty_latent_width, empty_latent_height, seed,
+                       empty_latent_aspect, empty_latent_width, empty_latent_height, batch_size, seed,
                        model_override=None, clip_override=None, optional_lora_stack=None, optional_controlnet_stack=None, prepend_positive=None, prepend_negative=None,
                        prompt=None, my_unique_id=None):
 
@@ -1079,7 +1086,7 @@ class ttN_pipeLoader_v2:
         vae: VAE | None = None
 
         # Create Empty Latent
-        latent = sampler.emptyLatent(empty_latent_aspect, 1, empty_latent_width, empty_latent_height)
+        latent = sampler.emptyLatent(empty_latent_aspect, batch_size, empty_latent_width, empty_latent_height)
         samples = {"samples":latent}
 
         model, clip, vae = loader.load_main3(ckpt_name, config_name, vae_name, loras, clip_skip, model_override, clip_override, optional_lora_stack)
@@ -1113,11 +1120,6 @@ class ttN_pipeLoader_v2:
 
 class ttN_pipeKSampler_v2:
     version = '2.3.1'
-    upscale_methods = ["None",
-                       "[latent] nearest-exact", "[latent] bilinear", "[latent] area", "[latent] bicubic", "[latent] lanczos", "[latent] bislerp",
-                       "[hiresFix] nearest-exact", "[hiresFix] bilinear", "[hiresFix] area", "[hiresFix] bicubic", "[hiresFix] lanczos", "[hiresFix] bislerp"]
-    crop_methods = ["disabled", "center"]
-
     def __init__(self):
         pass
 
@@ -1129,7 +1131,7 @@ class ttN_pipeKSampler_v2:
                 "lora_name": (["None"] + folder_paths.get_filename_list("loras"),),
                 "lora_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
 
-                "upscale_method": (cls.upscale_methods, {"default": "None"}),
+                "upscale_method": (UPSCALE_METHODS, {"default": "None"}),
                 "upscale_model_name": (folder_paths.get_filename_list("upscale_models"),),
                 "factor": ("FLOAT", {"default": 2, "min": 0.0, "max": 10.0, "step": 0.25}),
                 "rescale": (["by percentage", "to Width/Height", 'to longer side - maintain aspect', 'None'],),
@@ -1137,12 +1139,12 @@ class ttN_pipeKSampler_v2:
                 "width": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                 "height": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                 "longer_side": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
-                "crop": (cls.crop_methods,),
+                "crop": (CROP_METHODS,),
 
                 "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                "scheduler": (comfy.samplers.KSampler.SCHEDULERS,),
+                "scheduler": (comfy.samplers.KSampler.SCHEDULERS + CUSTOM_SCHEDULERS,),
                 "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "image_output": (["Hide", "Preview", "Save", "Hide/Save", "Disabled"],),
                 "save_prefix": ("STRING", {"default": "ComfyUI"}),
@@ -1302,11 +1304,6 @@ class ttN_pipeKSampler_v2:
 
 class ttN_pipeKSamplerAdvanced_v2:
     version = '2.3.0'
-    upscale_methods = ["None",
-                       "[latent] nearest-exact", "[latent] bilinear", "[latent] area", "[latent] bicubic", "[latent] lanczos", "[latent] bislerp",
-                       "[hiresFix] nearest-exact", "[hiresFix] bilinear", "[hiresFix] area", "[hiresFix] bicubic", "[hiresFix] lanczos", "[hiresFix] bislerp"]
-    crop_methods = ["disabled", "center"]
-
     def __init__(self):
         pass
 
@@ -1319,7 +1316,7 @@ class ttN_pipeKSamplerAdvanced_v2:
                 "lora_name": (["None"] + folder_paths.get_filename_list("loras"),),
                 "lora_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
 
-                "upscale_method": (cls.upscale_methods, {"default": "None"}),
+                "upscale_method": (UPSCALE_METHODS, {"default": "None"}),
                 "upscale_model_name": (folder_paths.get_filename_list("upscale_models"),),
                 "factor": ("FLOAT", {"default": 2, "min": 0.0, "max": 10.0, "step": 0.25}),
                 "rescale": (["by percentage", "to Width/Height", 'to longer side - maintain aspect', 'None'],),
@@ -1327,7 +1324,7 @@ class ttN_pipeKSamplerAdvanced_v2:
                 "width": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                 "height": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                 "longer_side": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
-                "crop": (cls.crop_methods,),
+                "crop": (CROP_METHODS,),
                 
                 "add_noise": (["enable", "disable"], ),
                 "noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
@@ -1338,7 +1335,7 @@ class ttN_pipeKSamplerAdvanced_v2:
                 "end_at_step": ("INT", {"default": 10000, "min": 0, "max": 10000}),
                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                "scheduler": (comfy.samplers.KSampler.SCHEDULERS,),
+                "scheduler": (comfy.samplers.KSampler.SCHEDULERS + CUSTOM_SCHEDULERS,),
                 "return_with_leftover_noise": (["disable", "enable"], ),
                 "image_output": (["Hide", "Preview", "Save", "Hide/Save", "Disabled"],),
                 "save_prefix": ("STRING", {"default": "ComfyUI"}),
@@ -1387,7 +1384,7 @@ class ttN_pipeKSamplerAdvanced_v2:
                 optional_model, optional_positive, optional_negative, optional_latent, optional_vae, optional_clip, input_image_override, noise_seed, adv_xyPlot, upscale_model_name, upscale_method, factor, rescale, percent, width, height, longer_side, crop, prompt, extra_pnginfo, my_unique_id, start_at_step, end_at_step, force_full_denoise, disable_noise)
 
 class ttN_pipeLoaderSDXL_v2:
-    version = '2.0.0'
+    version = '2.1.0'
     @classmethod
     def INPUT_TYPES(cls):
         aspect_ratios = ["width x height [custom]",
@@ -1434,7 +1431,7 @@ class ttN_pipeLoaderSDXL_v2:
                         "negative_g": ("STRING", {"placeholder": "negative_g", "multiline": True, "dynamicPrompts": True}),
                         "negative_l": ("STRING", {"placeholder": "negative_l", "multiline": True, "dynamicPrompts": True}),
 
-                        "conditioning_aspect": (relative_ratios, {"default": "2x Empty Latent Aspect"}),
+                        "conditioning_aspect": (relative_ratios, {"default": "1x Empty Latent Aspect"}),
                         "conditioning_width": ("INT", {"default": 2048.0, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                         "conditioning_height": ("INT", {"default": 2048.0, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                         
@@ -1451,6 +1448,7 @@ class ttN_pipeLoaderSDXL_v2:
                         "empty_latent_aspect": (aspect_ratios, {"default": "1024 x 1024 [S] 1:1"}),
                         "empty_latent_width": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                         "empty_latent_height": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                        "batch_size": ("INT", {"default": 1, "min": 1, "max": 64}),
                         "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                         },                
                 "optional": {
@@ -1479,7 +1477,7 @@ class ttN_pipeLoaderSDXL_v2:
                         conditioning_aspect, conditioning_width, conditioning_height, crop_width, crop_height, target_aspect, target_width, target_height,
                         positive_g, positive_l, negative_g, negative_l,
                         positive_ascore, negative_ascore,
-                        empty_latent_aspect, empty_latent_width, empty_latent_height, seed,
+                        empty_latent_aspect, empty_latent_width, empty_latent_height, batch_size, seed,
                         model_override=None, clip_override=None, optional_lora_stack=None, optional_controlnet_stack=None,
                         refiner_model_override=None, refiner_clip_override=None,
                         prepend_positive_g=None, prepend_positive_l=None, prepend_negative_g=None, prepend_negative_l=None,
@@ -1490,7 +1488,7 @@ class ttN_pipeLoaderSDXL_v2:
         vae: VAE | None = None
 
         # Create Empty Latent
-        latent = sampler.emptyLatent(empty_latent_aspect, 1, empty_latent_width, empty_latent_height)
+        latent = sampler.emptyLatent(empty_latent_aspect, batch_size, empty_latent_width, empty_latent_height)
         samples = {"samples":latent}
 
         model, clip, vae = loader.load_main3(ckpt_name, config_name, vae_name, loras, clip_skip, model_override, clip_override, optional_lora_stack)
@@ -1551,11 +1549,6 @@ class ttN_pipeLoaderSDXL_v2:
 
 class ttN_pipeKSamplerSDXL_v2:
     version = '2.3.1'
-    upscale_methods = ["None",
-                       "[latent] nearest-exact", "[latent] bilinear", "[latent] area", "[latent] bicubic", "[latent] lanczos", "[latent] bislerp",
-                       "[hiresFix] nearest-exact", "[hiresFix] bilinear", "[hiresFix] area", "[hiresFix] bicubic", "[hiresFix] lanczos", "[hiresFix] bislerp"]
-    crop_methods = ["disabled", "center"]
-
     def __init__(self):
         pass
 
@@ -1567,7 +1560,7 @@ class ttN_pipeKSamplerSDXL_v2:
                 "lora_name": (["None"] + folder_paths.get_filename_list("loras"),),
                 "lora_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
 
-                "upscale_method": (cls.upscale_methods, {"default": "None"}),
+                "upscale_method": (UPSCALE_METHODS, {"default": "None"}),
                 "upscale_model_name": (folder_paths.get_filename_list("upscale_models"),),
                 "factor": ("FLOAT", {"default": 2, "min": 0.0, "max": 10.0, "step": 0.25}),
                 "rescale": (["by percentage", "to Width/Height", 'to longer side - maintain aspect', 'None'],),
@@ -1575,7 +1568,7 @@ class ttN_pipeKSamplerSDXL_v2:
                 "width": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                 "height": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                 "longer_side": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
-                "crop": (cls.crop_methods,),
+                "crop": (CROP_METHODS,),
 
                 "base_steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
@@ -1584,7 +1577,7 @@ class ttN_pipeKSamplerSDXL_v2:
                 "refiner_cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
                 "refiner_denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                "scheduler": (comfy.samplers.KSampler.SCHEDULERS,),
+                "scheduler": (comfy.samplers.KSampler.SCHEDULERS + CUSTOM_SCHEDULERS,),
                 "image_output": (["Hide", "Preview", "Save", "Hide/Save", "Disabled"],),
                 "save_prefix": ("STRING", {"default": "ComfyUI"}),
                 "file_type": (OUTPUT_FILETYPES, {"default": "png"}),
@@ -2125,7 +2118,7 @@ class ttN_pipeLoraStack:
 
 #--------------------------------------------------------------ttN/base START-----------------------------------------------------------------------#
 class ttN_tinyLoader:
-    version = '1.0.0'
+    version = '1.1.0'
     @classmethod
     def INPUT_TYPES(cls):
         aspect_ratios = ["width x height [custom]",
@@ -2141,9 +2134,23 @@ class ttN_tinyLoader:
                         "768 x 512 [L] 3:2",
                         "910 x 512 [L] 16:9",
                         
+                        "1024 x 1024 [S] 1:1",                        
                         "512 x 1024 [P] 1:2",
                         "1024 x 512 [L] 2:1",
-                        "1024 x 1024 [S] 1:1",
+
+                        "640 x 1536 [P] 9:21",
+                        "704 x 1472 [P] 9:19",
+                        "768 x 1344 [P] 9:16",
+                        "768 x 1216 [P] 5:8",
+                        "832 x 1216 [P] 2:3",
+                        "896 x 1152 [P] 3:4",
+
+                        "1536 x 640 [L] 21:9",
+                        "1472 x 704 [L] 19:9",
+                        "1344 x 768 [L] 16:9",
+                        "1216 x 768 [L] 8:5",
+                        "1216 x 832 [L] 3:2",
+                        "1152 x 896 [L] 4:3",
                         ]
 
         return {"required": { 
@@ -2159,7 +2166,8 @@ class ttN_tinyLoader:
                         "empty_latent_aspect": (aspect_ratios, {"default":"512 x 512 [S] 1:1"}),
                         "empty_latent_width": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
                         "empty_latent_height": ("INT", {"default": 512, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
-                        },                
+                        "batch_size": ("INT", {"default": 1, "min": 1, "max": 64}),
+                        },
                 "hidden": {"prompt": "PROMPT", "ttNnodeVersion": ttN_tinyLoader.version, "my_unique_id": "UNIQUE_ID",}
                 }
 
@@ -2170,7 +2178,7 @@ class ttN_tinyLoader:
     CATEGORY = "🌏 tinyterra/base"
 
     def miniloader(self, ckpt_name, config_name, sampling, zsnr, cfg_rescale_mult, vae_name, clip_skip,
-                       empty_latent_aspect, empty_latent_width, empty_latent_height,
+                       empty_latent_aspect, empty_latent_width, empty_latent_height, batch_size,
                        prompt=None, my_unique_id=None):
 
         model: ModelPatcher | None = None
@@ -2178,7 +2186,7 @@ class ttN_tinyLoader:
         vae: VAE | None = None
 
         # Create Empty Latent
-        latent = sampler.emptyLatent(empty_latent_aspect, 1, empty_latent_width, empty_latent_height)
+        latent = sampler.emptyLatent(empty_latent_aspect, batch_size, empty_latent_width, empty_latent_height)
         samples = {"samples": latent}
 
         model, clip, vae = loader.load_checkpoint(ckpt_name, config_name, clip_skip)
@@ -2249,56 +2257,51 @@ class ttN_conditioning:
 
 class ttN_KSampler_v2:
     version = '2.3.1'
-    upscale_methods = ["None",
-                       "[latent] nearest-exact", "[latent] bilinear", "[latent] area", "[latent] bicubic", "[latent] lanczos", "[latent] bislerp",
-                       "[hiresFix] nearest-exact", "[hiresFix] bilinear", "[hiresFix] area", "[hiresFix] bicubic", "[hiresFix] lanczos", "[hiresFix] bislerp"]
-    crop_methods = ["disabled", "center"]
-
     def __init__(self):
         pass
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required":
-                {
-                "model": ("MODEL",),
-                "positive": ("CONDITIONING",),
-                "negative": ("CONDITIONING",),
-                "latent": ("LATENT",),
-                "vae": ("VAE",),
-                "clip": ("CLIP",),
+        return {"required": {
+                    "model": ("MODEL",),
+                    "positive": ("CONDITIONING",),
+                    "negative": ("CONDITIONING",),
+                    "latent": ("LATENT",),
+                    "vae": ("VAE",),
 
-                "lora_name": (["None"] + folder_paths.get_filename_list("loras"),),
-                "lora_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
+                    "lora_name": (["None"] + folder_paths.get_filename_list("loras"),),
+                    "lora_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
 
-                "upscale_method": (cls.upscale_methods, {"default": "None"}),
-                "upscale_model_name": (folder_paths.get_filename_list("upscale_models"),),
-                "factor": ("FLOAT", {"default": 2, "min": 0.0, "max": 10.0, "step": 0.25}),
-                "rescale": (["by percentage", "to Width/Height", 'to longer side - maintain aspect', 'None'],),
-                "percent": ("INT", {"default": 50, "min": 0, "max": 1000, "step": 1}),
-                "width": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
-                "height": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
-                "longer_side": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
-                "crop": (cls.crop_methods,),
+                    "upscale_method": (UPSCALE_METHODS, {"default": "None"}),
+                    "upscale_model_name": (folder_paths.get_filename_list("upscale_models"),),
+                    "factor": ("FLOAT", {"default": 2, "min": 0.0, "max": 10.0, "step": 0.25}),
+                    "rescale": (["by percentage", "to Width/Height", 'to longer side - maintain aspect', 'None'],),
+                    "percent": ("INT", {"default": 50, "min": 0, "max": 1000, "step": 1}),
+                    "width": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                    "height": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                    "longer_side": ("INT", {"default": 1024, "min": 64, "max": MAX_RESOLUTION, "step": 8}),
+                    "crop": (CROP_METHODS,),
 
-                "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
-                "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
-                "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
-                "scheduler": (comfy.samplers.KSampler.SCHEDULERS,),
-                "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "image_output": (["Hide", "Preview", "Save", "Hide/Save", "Disabled"],),
-                "save_prefix": ("STRING", {"default": "ComfyUI"}),
-                "file_type": (OUTPUT_FILETYPES,{"default": "png"}),
-                "embed_workflow": ("BOOLEAN", {"default": True}),
+                    "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
+                    "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0}),
+                    "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
+                    "scheduler": (comfy.samplers.KSampler.SCHEDULERS + CUSTOM_SCHEDULERS,),
+                    "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                    "image_output": (["Hide", "Preview", "Save", "Hide/Save", "Disabled"],),
+                    "save_prefix": ("STRING", {"default": "ComfyUI"}),
+                    "file_type": (OUTPUT_FILETYPES,{"default": "png"}),
+                    "embed_workflow": ("BOOLEAN", {"default": True}),
                 },
-                "optional": 
-                {"seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                "input_image_override": ("IMAGE",),
-                "adv_xyPlot": ("ADV_XYPLOT",),
+                "optional": {
+                    "clip": ("CLIP",),
+                    "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                    "input_image_override": ("IMAGE",),
+                    "adv_xyPlot": ("ADV_XYPLOT",),
                 },
-                "hidden":
-                {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "my_unique_id": "UNIQUE_ID",
-                 "ttNnodeVersion": ttN_pipeKSampler_v2.version},
+                "hidden": {
+                    "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "my_unique_id": "UNIQUE_ID",
+                    "ttNnodeVersion": ttN_pipeKSampler_v2.version
+                },
         }
 
     RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING", "LATENT", "VAE", "CLIP", "IMAGE", "INT", "IMAGE")
@@ -2307,11 +2310,11 @@ class ttN_KSampler_v2:
     FUNCTION = "sample"
     CATEGORY = "🌏 tinyterra/base"
 
-    def sample(self, model, positive, negative, latent, vae, clip,
+    def sample(self, model, positive, negative, latent, vae,
                 lora_name, lora_strength,
                 steps, cfg, sampler_name, scheduler, image_output, save_prefix, file_type, embed_workflow, denoise=1.0, 
                 input_image_override=None,
-                seed=None, adv_xyPlot=None, upscale_model_name=None, upscale_method=None, factor=None, rescale=None, percent=None, width=None, height=None, longer_side=None, crop=None,
+                clip=None, seed=None, adv_xyPlot=None, upscale_model_name=None, upscale_method=None, factor=None, rescale=None, percent=None, width=None, height=None, longer_side=None, crop=None,
                 prompt=None, extra_pnginfo=None, my_unique_id=None, start_step=None, last_step=None, force_full_denoise=False, disable_noise=False):
 
         my_unique_id = int(my_unique_id)
@@ -2324,6 +2327,8 @@ class ttN_KSampler_v2:
                                  image_output, save_prefix, file_type, embed_workflow, prompt, extra_pnginfo, my_unique_id, preview_latent, start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise, disable_noise=disable_noise):
             # Load Lora
             if lora_name not in (None, "None"):
+                if clip == None:
+                    raise ValueError(f"tinyKSampler [{my_unique_id}] - Lora requires CLIP model")
                 model, clip = loader.load_lora(lora_name, model, clip, lora_model_strength, lora_clip_strength)
 
             upscale_method = upscale_method.split(' ', 1)
@@ -2354,7 +2359,7 @@ class ttN_KSampler_v2:
             return {"ui": {"images": results},
                     "result": (model, positive, negative, samples, vae, clip, images, seed, None)}
 
-        def process_xyPlot(model, clip, samples, vae, seed, positive, negative, lora_name, lora_model_strength, lora_clip_strength,
+        def process_xyPlot(model, clip, samp_samples, vae, seed, positive, negative, lora_name, lora_model_strength, lora_clip_strength,
                            steps, cfg, sampler_name, scheduler, denoise,
                            image_output, save_prefix, file_type, embed_workflow, prompt, extra_pnginfo, my_unique_id, preview_latent, adv_xyPlot):
 
@@ -2367,7 +2372,7 @@ class ttN_KSampler_v2:
             del executor, plotter
 
             if samples is None and images is None:
-                return process_sample_state(model, images, clip, samples, vae, seed, positive, negative, lora_name, lora_model_strength, lora_clip_strength,
+                return process_sample_state(model, images, clip, samp_samples, vae, seed, positive, negative, lora_name, lora_model_strength, lora_clip_strength,
                                  upscale_model_name, upscale_method, factor, rescale, percent, width, height, longer_side, crop,
                                  steps, cfg, sampler_name, scheduler, denoise,
                                  image_output, save_prefix, file_type, embed_workflow, prompt, extra_pnginfo, my_unique_id, preview_latent, start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise, disable_noise=disable_noise)
