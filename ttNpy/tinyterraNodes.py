@@ -11,7 +11,7 @@
 # Like the pack and want to support me?                     https://www.buymeacoffee.com/tinyterra                                                  #
 #---------------------------------------------------------------------------------------------------------------------------------------------------#
 
-ttN_version = '2.0.2'
+ttN_version = '2.0.3'
 
 MAX_RESOLUTION=8192
 OUTPUT_FILETYPES = ["png", "jpg", "jpeg", "tiff", "tif", "webp", "bmp"]
@@ -49,13 +49,17 @@ import comfy.controlnet
 import comfy.model_management
 import comfy_extras.nodes_model_advanced
 from comfy.sd import CLIP, VAE
+from spandrel import ModelLoader, ImageModelDescriptor
 from .adv_encode import advanced_encode
 from comfy.model_patcher import ModelPatcher
+<<<<<<< HEAD
 <<<<<<< HEAD
 from spandrel import ModelLoader, ImageModelDescriptor
 from .adv_encode import advanced_encode, advanced_encode_XL
 =======
 from comfy_extras.chainner_models import model_loading
+=======
+>>>>>>> upstream/main
 from comfy_extras.nodes_align_your_steps import AlignYourStepsScheduler
 from nodes import MAX_RESOLUTION, ControlNetApplyAdvanced
 from nodes import NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS
@@ -67,6 +71,7 @@ from .ttNexecutor import xyExecutor
 class ttNloader:
     def __init__(self):
         self.loraDict = {lora.split('\\')[-1]: lora for lora in folder_paths.get_filename_list("loras")}
+        self.loader_cache = {}
 
     @staticmethod
     def nsp_parse(text, seed=0, noodle_key='__', nspterminology=None, pantry_path=None, title=None, my_unique_id=None):
@@ -139,16 +144,26 @@ class ttNloader:
         h = hashlib.sha256(s.encode()).digest()
         return (int.from_bytes(h, byteorder='big') & 0xffffffffffffffff)
 
-    def load_checkpoint(self, ckpt_name, config_name=None, clip_skip=0):
+    def clear_cache(self, prompt, full=False):
+        loader_ids = [f'loader{key}' for key, value in prompt.items() if value['class_type'] in ['ttN pipeLoader_v2', 'ttN pipeLoaderSDXL_v2']]
+
+        if full is True:
+            self.loader_cache = {}
+        else:
+            for key in list(self.loader_cache.keys()):
+                if key not in loader_ids:
+                    self.loader_cache.pop(key)
+            
+    def load_checkpoint(self, ckpt_name, config_name=None, clip_skip=0, output_vae=True, output_clip=True):
         ckpt_path = folder_paths.get_full_path("checkpoints", ckpt_name)
         if config_name not in [None, "Default"]:
             config_path = folder_paths.get_full_path("configs", config_name)
-            loaded_ckpt = comfy.sd.load_checkpoint(config_path, ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
+            loaded_ckpt = comfy.sd.load_checkpoint(config_path, ckpt_path, output_vae=output_vae, output_clip=output_clip, embedding_directory=folder_paths.get_folder_paths("embeddings"))
         else:
-            loaded_ckpt = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
+            loaded_ckpt = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=output_vae, output_clip=output_clip, embedding_directory=folder_paths.get_folder_paths("embeddings"))
 
-        clip = loaded_ckpt[1].clone()
-        if clip_skip != 0:
+        clip = loaded_ckpt[1].clone() if loaded_ckpt[1] is not None else None
+        if clip_skip != 0 and clip is not None:
             clip.clip_layer(clip_skip)
 
         # model, clip, vae
@@ -275,14 +290,42 @@ class ttNloader:
 
         return conditioning, refiner_conditioning
         
-    def load_main3(self, ckpt_name, config_name, vae_name, loras, clip_skip, model_override=None, clip_override=None, optional_lora_stack=None):
-        # Load models
-        if (model_override is not None) and (clip_override is not None) and (vae_name != "Baked VAE"):
-            model, clip, vae = None, None, None
-        else:
-            model, clip, vae = self.load_checkpoint(ckpt_name, config_name, clip_skip)
+    def load_main3(self, ckpt_name, config_name, vae_name, loras, clip_skip, model_override=None, clip_override=None, optional_lora_stack=None, unique_id=None):
+        cache = self.loader_cache.get(f'loader{unique_id}', None)
 
+        model = "override" if model_override is not None else None
+        clip = "override" if clip_override is not None else None
+        vae = None
+
+        if cache is not None and cache[0] == ckpt_name and cache[1] == config_name and cache[2] == vae_name and model is None and clip is None:
+            # Load from cache if it's the same
+            model = cache[3]
+            clip = cache[4]
+            vae = cache[5]
+        elif model is None or clip is None:
+            self.loader_cache.pop(f'loader{unique_id}', None)
+            
+            # Load normally
+            output_vae, output_clip = True, True
+            
+            if vae_name != "Baked VAE":
+                output_vae = False
+            if clip not in [None, "None", "override"]:
+                output_clip = False                
+
+            model, clip, vae = self.load_checkpoint(ckpt_name, config_name, clip_skip, output_vae, output_clip)
+
+        if vae is None:
+            if vae_name != "Baked VAE":
+                vae = self.load_vae(vae_name)
+            else:
+                _, _, vae = self.load_checkpoint(ckpt_name, config_name, clip_skip, output_vae=True, output_clip=False)
+                
+        if unique_id is not None and model != "override" and clip != "override":
+            self.loader_cache[f'loader{unique_id}'] = [ckpt_name, config_name, vae_name, model, clip, vae]
+                
         if model_override is not None:
+            self.loader_cache.pop(f'loader{unique_id}', None)
             model = model_override
             del model_override
 
@@ -292,9 +335,6 @@ class ttNloader:
             if clip_skip != 0:
                 clip.clip_layer(clip_skip)
             del clip_override
-
-        if vae_name != "Baked VAE":
-            vae = self.load_vae(vae_name)
 
         if optional_lora_stack is not None:
             for lora in optional_lora_stack:
@@ -405,10 +445,22 @@ class ttNsampler:
         s["samples"] = comfy.utils.common_upscale(samples["samples"], width, height, upscale_method, crop)
         return (s,)
 
-    def handle_upscale(self, samples: dict, upscale_method: str, factor: float, crop: bool) -> dict:
+    def handle_upscale(self, samples: dict, upscale_method: str, factor: float, crop: bool,
+                       upscale_model_name: str=None, vae: VAE=None, images: np.ndarray=None, rescale: str=None, percent: float=None, width: int=None, height: int=None, longer_side: int=None) -> dict:
         """Upscale the samples if the upscale_method is not set to 'None'."""
-        if upscale_method != "None":
-            samples = self.upscale(samples, upscale_method, factor, crop)[0]
+        upscale_method = upscale_method.split(' ', 1)
+
+        # Upscale samples if enabled
+        if upscale_method[0] == "[latent]":
+            if upscale_method[1] != "None":
+                samples = self.upscale(samples, upscale_method[1], factor, crop)[0]
+        
+        if upscale_method[0] == "[hiresFix]": 
+            if (images is None):
+                images = vae.decode(samples["samples"])
+            hiresfix = ttN_modelScale()
+            samples = hiresfix.upscale(upscale_model_name, vae, images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True)
+
         return samples
 
     def get_output(self, pipe: dict) -> Tuple:
@@ -891,8 +943,10 @@ class ttNsave:
         filename = re.sub(r'%date:(.*?)%', lambda m: ttNsave._format_date(m.group(1), datetime.datetime.now()), filename_prefix)
         all_inputs = ttNsave._gather_all_inputs(prompt, my_unique_id)
 
-        filename = re.sub(r'%(.*?)%', lambda m: str(all_inputs.get(m.group(1), '')), filename)
-        
+        #filename = re.sub(r'%(.*?)\s*(?::(\d+))?%', lambda m: re.sub(r'[^a-zA-Z0-9_\-\. ]', '', str(all_inputs.get(m.group(1), ''))[:int(m.group(2)) if m.group(2) else len(str(all_inputs.get(m.group(1), '')))]), filename)
+
+        filename = re.sub(r'%(.*?)%', lambda m: re.sub(r'[^a-zA-Z0-9_\-\. ]', '', str(all_inputs.get(m.group(1), ''))), filename)
+
         subfolder = os.path.dirname(os.path.normpath(filename))
         filename = os.path.basename(os.path.normpath(filename))
 
@@ -906,8 +960,9 @@ class ttNsave:
     def folder_parser(output_dir: str, prompt: Dict[str, dict], my_unique_id: str):
         output_dir = re.sub(r'%date:(.*?)%', lambda m: ttNsave._format_date(m.group(1), datetime.datetime.now()), output_dir)
         all_inputs = ttNsave._gather_all_inputs(prompt, my_unique_id)
-
-        return re.sub(r'%(.*?)%', lambda m: str(all_inputs.get(m.group(1), '')), output_dir)
+        
+        return re.sub(r'%(.*?)%', lambda m: re.sub(r'[^a-zA-Z0-9_\-\. ]', '', str(all_inputs.get(m.group(1), ''))), output_dir)
+        #return re.sub(r'%(.*?)\s*(?::(\d+))?%', lambda m: re.sub(r'[^a-zA-Z0-9_\-\. ]', '', str(all_inputs.get(m.group(1), ''))[:int(m.group(2)) if m.group(2) else len(str(all_inputs.get(m.group(1), '')))]), output_dir)
 
     def images(self, images, filename_prefix, output_type, embed_workflow=True, ext="png", group_id=0):
         FORMAT_MAP = {
@@ -1065,7 +1120,8 @@ class ttN_pipeLoader_v2:
                     "prepend_positive": ("STRING", {"default": None, "forceInput": True}),
                     "prepend_negative": ("STRING", {"default": None, "forceInput": True}),
                     },
-                "hidden": {"prompt": "PROMPT", "ttNnodeVersion": ttN_pipeLoader_v2.version}, "my_unique_id": "UNIQUE_ID",}
+                "hidden": {"prompt": "PROMPT", "ttNnodeVersion": ttN_pipeLoader_v2.version, "my_unique_id": "UNIQUE_ID",}
+                }
 
     RETURN_TYPES = ("PIPE_LINE" ,"MODEL", "CONDITIONING", "CONDITIONING", "LATENT", "VAE", "CLIP", "INT", "INT", "INT", "STRING", "STRING")
     RETURN_NAMES = ("pipe","model", "positive", "negative", "latent", "vae", "clip", "seed", "width", "height", "pos_string", "neg_string")
@@ -1089,7 +1145,8 @@ class ttN_pipeLoader_v2:
         latent = sampler.emptyLatent(empty_latent_aspect, batch_size, empty_latent_width, empty_latent_height)
         samples = {"samples":latent}
 
-        model, clip, vae = loader.load_main3(ckpt_name, config_name, vae_name, loras, clip_skip, model_override, clip_override, optional_lora_stack)
+        loader.clear_cache(prompt)
+        model, clip, vae = loader.load_main3(ckpt_name, config_name, vae_name, loras, clip_skip, model_override, clip_override, optional_lora_stack, my_unique_id)
 
         positive_embedding = loader.embedding_encode(positive, positive_token_normalization, positive_weight_interpretation, clip, seed=seed, title='pipeLoader Positive', my_unique_id=my_unique_id, prepend_text=prepend_positive)
         negative_embedding = loader.embedding_encode(negative, negative_token_normalization, negative_weight_interpretation, clip, seed=seed, title='pipeLoader Negative', my_unique_id=my_unique_id, prepend_text=prepend_negative)
@@ -1207,17 +1264,9 @@ class ttN_pipeKSampler_v2:
             if lora_name not in (None, "None"):
                 samp_model, samp_clip = loader.load_lora(lora_name, samp_model, samp_clip, lora_model_strength, lora_clip_strength)
 
-            upscale_method = upscale_method.split(' ', 1)
-
             # Upscale samples if enabled
-            if upscale_method[0] == "[latent]":
-                samp_samples = sampler.handle_upscale(samp_samples, upscale_method[1], factor, crop)
-            
-            if upscale_method[0] == "[hiresFix]": 
-                if (samp_images is None):
-                    samp_images = samp_vae.decode(samp_samples["samples"])
-                hiresfix = ttN_modelScale()
-                samp_samples = hiresfix.upscale(upscale_model_name, samp_vae, samp_images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True)
+            if upscale_method != "None":
+                samp_samples = sampler.handle_upscale(samp_samples, upscale_method, factor, crop, upscale_model_name, samp_vae, samp_images, rescale, percent, width, height, longer_side)
 
             samp_samples = sampler.common_ksampler(samp_model, samp_seed, steps, cfg, sampler_name, scheduler, samp_positive, samp_negative, samp_samples, denoise=denoise, preview_latent=preview_latent, start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise, disable_noise=disable_noise)
       
@@ -1463,7 +1512,8 @@ class ttN_pipeLoaderSDXL_v2:
                     "prepend_negative_g": ("STRING", {"default": None, "forceInput": True}),
                     "prepend_negative_l": ("STRING", {"default": None, "forceInput": True}),
                     },
-                "hidden": {"prompt": "PROMPT", "ttNnodeVersion": ttN_pipeLoaderSDXL_v2.version}, "my_unique_id": "UNIQUE_ID",}
+                "hidden": {"prompt": "PROMPT", "ttNnodeVersion": ttN_pipeLoaderSDXL_v2.version, "my_unique_id": "UNIQUE_ID",}
+                }
 
     RETURN_TYPES = ("PIPE_LINE_SDXL" ,"MODEL", "CONDITIONING", "CONDITIONING", "VAE", "CLIP", "MODEL", "CONDITIONING", "CONDITIONING", "CLIP", "LATENT", "INT", "INT", "INT", "STRING", "STRING")
     RETURN_NAMES = ("sdxl_pipe","model", "positive", "negative", "vae", "clip", "refiner_model", "refiner_positive", "refiner_negative", "refiner_clip", "latent", "seed", "width", "height", "pos_string", "neg_string")
@@ -1491,7 +1541,8 @@ class ttN_pipeLoaderSDXL_v2:
         latent = sampler.emptyLatent(empty_latent_aspect, batch_size, empty_latent_width, empty_latent_height)
         samples = {"samples":latent}
 
-        model, clip, vae = loader.load_main3(ckpt_name, config_name, vae_name, loras, clip_skip, model_override, clip_override, optional_lora_stack)
+        loader.clear_cache(prompt)
+        model, clip, vae = loader.load_main3(ckpt_name, config_name, vae_name, loras, clip_skip, model_override, clip_override, optional_lora_stack, my_unique_id)
 
         if refiner_ckpt_name not in ["None", None]:
             refiner_model, refiner_clip, refiner_vae = loader.load_main3(refiner_ckpt_name, refiner_config_name, vae_name, None, clip_skip, refiner_model_override, refiner_clip_override)
@@ -1656,17 +1707,8 @@ class ttN_pipeKSamplerSDXL_v2:
             total_steps = base_steps + refiner_steps
 
             # Upscale samples if enabled
-            upscale_method = upscale_method.split(' ', 1)
-
-            if upscale_method[0] == "[latent]":
-                sdxl_samples = sampler.handle_upscale(sdxl_samples, upscale_method[1], factor, crop)
-            
-            if upscale_method[0] == "[hiresFix]":
-                if (sdxl_images is None):
-                    sdxl_images = sdxl_vae.decode(sdxl_samples["samples"])
-                hiresfix = ttN_modelScale()
-                sdxl_samples = hiresfix.upscale(upscale_model_name, sdxl_vae, sdxl_images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True)
-
+            if upscale_method != "None":
+                sdxl_samples = sampler.handle_upscale(sdxl_samples, upscale_method, factor, crop, upscale_model_name, sdxl_vae, sdxl_images, rescale, percent, width, height, longer_side,)
 
             if (refiner_steps > 0) and (sdxl_refiner_model not in [None, "None"]):
                 # Base Sample
@@ -2300,7 +2342,7 @@ class ttN_KSampler_v2:
                 },
                 "hidden": {
                     "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "my_unique_id": "UNIQUE_ID",
-                    "ttNnodeVersion": ttN_pipeKSampler_v2.version
+                    "ttNnodeVersion": ttN_KSampler_v2.version
                 },
         }
 
@@ -2331,17 +2373,9 @@ class ttN_KSampler_v2:
                     raise ValueError(f"tinyKSampler [{my_unique_id}] - Lora requires CLIP model")
                 model, clip = loader.load_lora(lora_name, model, clip, lora_model_strength, lora_clip_strength)
 
-            upscale_method = upscale_method.split(' ', 1)
-
             # Upscale samples if enabled
-            if upscale_method[0] == "[latent]":
-                samples = sampler.handle_upscale(samples, upscale_method[1], factor, crop)
-            
-            if upscale_method[0] == "[hiresFix]": 
-                if (images is None):
-                    images = vae.decode(samples["samples"])
-                hiresfix = ttN_modelScale()
-                samples = hiresfix.upscale(upscale_model_name, vae, images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True)
+            if upscale_method != "None":
+                samples = sampler.handle_upscale(samples, upscale_method, factor, crop, upscale_model_name, vae, images, rescale, percent, width, height, longer_side)
 
             samples = sampler.common_ksampler(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, samples, denoise=denoise, preview_latent=preview_latent, start_step=start_step, last_step=last_step, force_full_denoise=force_full_denoise, disable_noise=disable_noise)
       
@@ -2994,6 +3028,32 @@ class ttN_text7BOX_concat:
         concat = delimiter.join(text for text in texts if text)
         return text1, text2, text3, text4, text5, text6, text7, concat
 
+class ttN_textCycleLine:
+    version = '1.0.0'
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                    "text": ("STRING", {"multiline": True, "default": '', "dynamicPrompts": True}),
+                    "index": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                    "index_control": (['increment', 'decrement', 'randomize','fixed'],),
+                    },
+                "hidden": {"ttNnodeVersion": ttN_textCycleLine.version},
+                }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "cycle"
+
+    CATEGORY = "🌏 tinyterra/text"
+
+    def cycle(self, text, index, index_control='randomized'):
+        lines = text.split('\n')
+
+        if index >= len(lines):
+            index = len(lines) - 1
+        return (lines[index],)
 #---------------------------------------------------------------ttN/text END------------------------------------------------------------------------#
 
 
@@ -3239,7 +3299,15 @@ class ttN_modelScale:
         # Load Model
         model_path = folder_paths.get_full_path("upscale_models", model_name)
         sd = comfy.utils.load_torch_file(model_path, safe_load=True)
+<<<<<<< HEAD
         upscale_model = ModelLoader().load_from_state_dict(sd).eval()
+=======
+
+        upscale_model = ModelLoader().load_from_state_dict(sd).eval()
+        
+        if not isinstance(upscale_model, ImageModelDescriptor):
+            raise Exception("Upscale model must be a single-image model.")
+>>>>>>> upstream/main
 
         # Model upscale
         device = comfy.model_management.get_torch_device()
@@ -3325,6 +3393,7 @@ TTN_VERSIONS = {
     "concat": ttN_concat.version,
     "text3BOX_3WAYconcat": ttN_text3BOX_3WAYconcat.version,    
     "text7BOX_concat": ttN_text7BOX_concat.version,
+    "textCycleLine": ttN_textCycleLine.version,
     "imageOutput": ttN_imageOUPUT.version,
     "imageREMBG": ttN_imageREMBG.version,
     "hiresfixScale": ttN_modelScale.version,
@@ -3363,6 +3432,7 @@ NODE_CLASS_MAPPINGS = {
     "ttN concat": ttN_concat,
     "ttN text3BOX_3WAYconcat": ttN_text3BOX_3WAYconcat,    
     "ttN text7BOX_concat": ttN_text7BOX_concat,
+    "ttN textCycleLine": ttN_textCycleLine,
 
     #ttN/image
     "ttN imageOutput": ttN_imageOUPUT,
@@ -3406,6 +3476,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ttN concat": "textConcat",
     "ttN text7BOX_concat": "7x TXT Loader Concat",
     "ttN text3BOX_3WAYconcat": "3x TXT Loader MultiConcat",
+    "ttN textCycleLine": "textCycleLine",
 
     #ttN/image
     "ttN imageREMBG": "imageRemBG",
