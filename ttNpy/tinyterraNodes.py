@@ -46,11 +46,8 @@ import latent_preview
 import numpy as np
 import torch
 from comfy.model_patcher import ModelPatcher
-<<<<<<< HEAD
 from spandrel import ModelLoader, ImageModelDescriptor
 from .adv_encode import advanced_encode, advanced_encode_XL
-=======
->>>>>>> upstream/main
 from comfy_extras.nodes_align_your_steps import AlignYourStepsScheduler
 from nodes import MAX_RESOLUTION
 from nodes import NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS
