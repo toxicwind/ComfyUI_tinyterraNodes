@@ -21,52 +21,47 @@ UPSCALE_METHODS = ["None",
 CROP_METHODS = ["disabled", "center"]
 CUSTOM_SCHEDULERS = ["AYS SD1", "AYS SDXL", "AYS SVD"]
 
-import os
-import re
-import json
 import copy
-import random
 import datetime
-from pathlib import Path
-from urllib.request import urlopen
+import hashlib
+import json
+import os
+import random
+import re
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple, Union, Any
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+from urllib.request import urlopen
 
+import comfy.controlnet
+import comfy.model_base
+import comfy.model_management
+import comfy.samplers
+import comfy.sd
+import comfy.utils
+import comfy_extras.nodes_model_advanced
+import execution
+import folder_paths
+import latent_preview
 import numpy as np
 import torch
-import hashlib
-from PIL import Image, ImageDraw, ImageFont
-from PIL.PngImagePlugin import PngInfo
-
-import comfy.sd
-import execution
-import comfy.utils
-import folder_paths
-import comfy.samplers
-import latent_preview
-import comfy.model_base
-import comfy.controlnet
-import comfy.model_management
-import comfy_extras.nodes_model_advanced
-from comfy.sd import CLIP, VAE
-from spandrel import ModelLoader, ImageModelDescriptor
-from .adv_encode import advanced_encode
 from comfy.model_patcher import ModelPatcher
-<<<<<<< HEAD
 <<<<<<< HEAD
 from spandrel import ModelLoader, ImageModelDescriptor
 from .adv_encode import advanced_encode, advanced_encode_XL
 =======
-from comfy_extras.chainner_models import model_loading
-=======
 >>>>>>> upstream/main
 from comfy_extras.nodes_align_your_steps import AlignYourStepsScheduler
-from nodes import MAX_RESOLUTION, ControlNetApplyAdvanced
+from nodes import MAX_RESOLUTION
 from nodes import NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS
+from nodes import ControlNetApplyAdvanced
+from PIL import Image, ImageDraw, ImageFont
+from PIL.PngImagePlugin import PngInfo
+from spandrel import ImageModelDescriptor, ModelLoader
 
->>>>>>> upstream/main
-from .utils import CC, ttNl, ttNpaths, AnyType
 from .ttNexecutor import xyExecutor
+from .utils import CC, AnyType, ttNl, ttNpaths
+
 
 class ttNloader:
     def __init__(self):
@@ -3299,15 +3294,12 @@ class ttN_modelScale:
         # Load Model
         model_path = folder_paths.get_full_path("upscale_models", model_name)
         sd = comfy.utils.load_torch_file(model_path, safe_load=True)
-<<<<<<< HEAD
-        upscale_model = ModelLoader().load_from_state_dict(sd).eval()
-=======
 
         upscale_model = ModelLoader().load_from_state_dict(sd).eval()
         
         if not isinstance(upscale_model, ImageModelDescriptor):
             raise Exception("Upscale model must be a single-image model.")
->>>>>>> upstream/main
+
 
         # Model upscale
         device = comfy.model_management.get_torch_device()
@@ -3323,7 +3315,7 @@ class ttN_modelScale:
         s = torch.clamp(s.movedim(-3,-1), min=0, max=1.0)
 
         # Post Model Rescale
-        if rescale_after_model == True:
+        if rescale_after_model is True:
             samples = s.movedim(-1, 1)
             orig_height = samples.shape[2]
             orig_width = samples.shape[3]
