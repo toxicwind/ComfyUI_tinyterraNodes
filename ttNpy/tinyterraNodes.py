@@ -56,6 +56,29 @@ from PIL import Image, ImageDraw, ImageFont
 from PIL.PngImagePlugin import PngInfo
 from spandrel import ImageModelDescriptor, ModelLoader
 
+<<<<<<< HEAD
+=======
+import comfy.sd
+import execution
+import comfy.utils
+import folder_paths
+import comfy.samplers
+import latent_preview
+import comfy.model_base
+import comfy.controlnet
+import comfy.model_management
+import comfy_extras.nodes_model_advanced
+import comfy_extras.nodes_upscale_model
+from comfy.sd import CLIP, VAE
+from spandrel import ModelLoader, ImageModelDescriptor
+from .adv_encode import advanced_encode
+from comfy.model_patcher import ModelPatcher
+from comfy_extras.nodes_align_your_steps import AlignYourStepsScheduler
+from nodes import MAX_RESOLUTION, ControlNetApplyAdvanced
+from nodes import NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS
+
+from .utils import CC, ttNl, ttNpaths, AnyType
+>>>>>>> upstream/main
 from .ttNexecutor import xyExecutor
 from .utils import CC, AnyType, ttNl, ttNpaths
 
@@ -525,7 +548,12 @@ class ttNadv_xyPlot:
 
     @staticmethod
     def get_font(font_size):
-        return ImageFont.truetype(str(Path(ttNpaths.font_path)), font_size)
+        if os.path.exists(ttNpaths.font_path):
+            try:
+                return ImageFont.truetype(str(Path(ttNpaths.font_path)), font_size)
+            except:
+                pass
+        return ImageFont.load_default()
     
     @staticmethod
     def rearrange_tensors(latent, num_cols, num_rows):
@@ -2260,7 +2288,7 @@ class ttN_conditioning:
                     "prepend_positive": ("STRING", {"default": None, "forceInput": True}),
                     "prepend_negative": ("STRING", {"default": None, "forceInput": True}),
                     },
-                "hidden": {"ttNnodeVersion": ttN_conditioning.version}, "my_unique_id": "UNIQUE_ID",}
+                "hidden": {"ttNnodeVersion": ttN_conditioning.version, "my_unique_id": "UNIQUE_ID"},}
 
     RETURN_TYPES = ("MODEL", "CONDITIONING", "CONDITIONING", "CLIP", "STRING", "STRING")
     RETURN_NAMES = ("model", "positive", "negative", "clip", "pos_string", "neg_string")
@@ -3289,16 +3317,11 @@ class ttN_modelScale:
 
     def upscale(self, model_name, vae, image, rescale_after_model, rescale_method, rescale, percent, width, height, longer_side, crop, image_output, save_prefix, output_latent, prompt=None, extra_pnginfo=None, my_unique_id=None):
         # Load Model
-        model_path = folder_paths.get_full_path("upscale_models", model_name)
-        sd = comfy.utils.load_torch_file(model_path, safe_load=True)
-
-        upscale_model = ModelLoader().load_from_state_dict(sd).eval()
-        
-        if not isinstance(upscale_model, ImageModelDescriptor):
-            raise Exception("Upscale model must be a single-image model.")
+        upscale_model = comfy_extras.nodes_upscale_model.UpscaleModelLoader().load_model(model_name)[0]
 
 
         # Model upscale
+<<<<<<< HEAD
         device = comfy.model_management.get_torch_device()
         upscale_model.to(device)
         in_img = image.movedim(-1,-3).to(device)
@@ -3310,6 +3333,9 @@ class ttN_modelScale:
         s = comfy.utils.tiled_scale(in_img, lambda a: upscale_model(a), tile_x=tile, tile_y=tile, overlap=overlap, upscale_amount=upscale_model.scale, pbar=pbar)
         upscale_model.to("cpu")
         s = torch.clamp(s.movedim(-3,-1), min=0, max=1.0)
+=======
+        s = comfy_extras.nodes_upscale_model.ImageUpscaleWithModel().upscale(upscale_model, image)[0]
+>>>>>>> upstream/main
 
         # Post Model Rescale
         if rescale_after_model is True:
