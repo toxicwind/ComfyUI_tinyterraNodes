@@ -39,49 +39,24 @@ import comfy.model_management
 import comfy.samplers
 import comfy.sd
 import comfy.utils
+import comfy_extras.chainner_models.model_loading
+import comfy_extras.nodes_align_your_steps.AlignYourStepsScheduler
 import comfy_extras.nodes_model_advanced
+import comfy_extras.nodes_upscale_model
 import execution
 import folder_paths
 import latent_preview
 import numpy as np
 import torch
 from comfy.model_patcher import ModelPatcher
-from spandrel import ModelLoader, ImageModelDescriptor
-from .adv_encode import advanced_encode, advanced_encode_XL
-from comfy_extras.nodes_align_your_steps import AlignYourStepsScheduler
-from nodes import MAX_RESOLUTION
-from nodes import NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS
-from nodes import ControlNetApplyAdvanced
+from comfy.sd import CLIP, VAE
+from nodes import MAX_RESOLUTION, NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS, ControlNetApplyAdvanced
 from PIL import Image, ImageDraw, ImageFont
 from PIL.PngImagePlugin import PngInfo
-from spandrel import ImageModelDescriptor, ModelLoader
-
-<<<<<<< HEAD
-=======
-import comfy.sd
-import execution
-import comfy.utils
-import folder_paths
-import comfy.samplers
-import latent_preview
-import comfy.model_base
-import comfy.controlnet
-import comfy.model_management
-import comfy_extras.nodes_model_advanced
-import comfy_extras.nodes_upscale_model
-from comfy.sd import CLIP, VAE
 from spandrel import ModelLoader, ImageModelDescriptor
-from .adv_encode import advanced_encode
-from comfy.model_patcher import ModelPatcher
-from comfy_extras.nodes_align_your_steps import AlignYourStepsScheduler
-from nodes import MAX_RESOLUTION, ControlNetApplyAdvanced
-from nodes import NODE_CLASS_MAPPINGS as COMFY_CLASS_MAPPINGS
-
-from .utils import CC, ttNl, ttNpaths, AnyType
->>>>>>> upstream/main
+from .adv_encode import advanced_encode, advanced_encode_XL
 from .ttNexecutor import xyExecutor
 from .utils import CC, AnyType, ttNl, ttNpaths
-
 
 class ttNloader:
     def __init__(self):
@@ -3321,7 +3296,6 @@ class ttN_modelScale:
 
 
         # Model upscale
-<<<<<<< HEAD
         device = comfy.model_management.get_torch_device()
         upscale_model.to(device)
         in_img = image.movedim(-1,-3).to(device)
@@ -3333,9 +3307,7 @@ class ttN_modelScale:
         s = comfy.utils.tiled_scale(in_img, lambda a: upscale_model(a), tile_x=tile, tile_y=tile, overlap=overlap, upscale_amount=upscale_model.scale, pbar=pbar)
         upscale_model.to("cpu")
         s = torch.clamp(s.movedim(-3,-1), min=0, max=1.0)
-=======
-        s = comfy_extras.nodes_upscale_model.ImageUpscaleWithModel().upscale(upscale_model, image)[0]
->>>>>>> upstream/main
+
 
         # Post Model Rescale
         if rescale_after_model is True:
