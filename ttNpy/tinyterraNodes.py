@@ -13,6 +13,7 @@
 
 ttN_version = '2.0.3'
 
+<<<<<<< HEAD
 MAX_RESOLUTION=8192
 OUTPUT_FILETYPES = ["png", "jpg", "jpeg", "tiff", "tif", "webp", "bmp"]
 UPSCALE_METHODS = ["None",
@@ -21,6 +22,11 @@ UPSCALE_METHODS = ["None",
 CROP_METHODS = ["disabled", "center"]
 CUSTOM_SCHEDULERS = ["AYS SD1", "AYS SDXL", "AYS SVD"]
 
+=======
+import os
+import re
+import json
+>>>>>>> upstream/main
 import copy
 import datetime
 import hashlib
@@ -57,6 +63,14 @@ from spandrel import ModelLoader, ImageModelDescriptor
 from .adv_encode import advanced_encode, advanced_encode_XL
 from .ttNexecutor import xyExecutor
 from .utils import CC, AnyType, ttNl, ttNpaths
+
+OUTPUT_FILETYPES = ["png", "jpg", "jpeg", "tiff", "tif", "webp", "bmp"]
+UPSCALE_METHODS = ["None",
+                    "[latent] nearest-exact", "[latent] bilinear", "[latent] area", "[latent] bicubic", "[latent] lanczos", "[latent] bislerp",
+                    "[hiresFix] nearest-exact", "[hiresFix] bilinear", "[hiresFix] area", "[hiresFix] bicubic", "[hiresFix] lanczos", "[hiresFix] bislerp"]
+UPSCALE_MODELS = folder_paths.get_filename_list("upscale_models") + ["None"]
+CROP_METHODS = ["disabled", "center"]
+CUSTOM_SCHEDULERS = ["AYS SD1", "AYS SDXL", "AYS SVD"]
 
 class ttNloader:
     def __init__(self):
@@ -449,6 +463,8 @@ class ttNsampler:
             if (images is None):
                 images = vae.decode(samples["samples"])
             hiresfix = ttN_modelScale()
+            if upscale_model_name == "None":
+                raise ValueError("Unable to model upscale. Please install an upscale model and try again.")
             samples = hiresfix.upscale(upscale_model_name, vae, images, True if rescale != 'None' else False, upscale_method[1], rescale, percent, width, height, longer_side, crop, "return latent", None, True)
 
         return samples
@@ -1189,7 +1205,7 @@ class ttN_pipeKSampler_v2:
                 "lora_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
 
                 "upscale_method": (UPSCALE_METHODS, {"default": "None"}),
-                "upscale_model_name": (folder_paths.get_filename_list("upscale_models"),),
+                "upscale_model_name": (UPSCALE_MODELS,),
                 "factor": ("FLOAT", {"default": 2, "min": 0.0, "max": 10.0, "step": 0.25}),
                 "rescale": (["by percentage", "to Width/Height", 'to longer side - maintain aspect', 'None'],),
                 "percent": ("INT", {"default": 50, "min": 0, "max": 1000, "step": 1}),
@@ -1366,7 +1382,7 @@ class ttN_pipeKSamplerAdvanced_v2:
                 "lora_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
 
                 "upscale_method": (UPSCALE_METHODS, {"default": "None"}),
-                "upscale_model_name": (folder_paths.get_filename_list("upscale_models"),),
+                "upscale_model_name": (UPSCALE_MODELS,),
                 "factor": ("FLOAT", {"default": 2, "min": 0.0, "max": 10.0, "step": 0.25}),
                 "rescale": (["by percentage", "to Width/Height", 'to longer side - maintain aspect', 'None'],),
                 "percent": ("INT", {"default": 50, "min": 0, "max": 1000, "step": 1}),
@@ -1611,7 +1627,7 @@ class ttN_pipeKSamplerSDXL_v2:
                 "lora_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
 
                 "upscale_method": (UPSCALE_METHODS, {"default": "None"}),
-                "upscale_model_name": (folder_paths.get_filename_list("upscale_models"),),
+                "upscale_model_name": (UPSCALE_MODELS,),
                 "factor": ("FLOAT", {"default": 2, "min": 0.0, "max": 10.0, "step": 0.25}),
                 "rescale": (["by percentage", "to Width/Height", 'to longer side - maintain aspect', 'None'],),
                 "percent": ("INT", {"default": 50, "min": 0, "max": 1000, "step": 1}),
@@ -2314,7 +2330,7 @@ class ttN_KSampler_v2:
                     "lora_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01}),
 
                     "upscale_method": (UPSCALE_METHODS, {"default": "None"}),
-                    "upscale_model_name": (folder_paths.get_filename_list("upscale_models"),),
+                    "upscale_model_name": (UPSCALE_MODELS,),
                     "factor": ("FLOAT", {"default": 2, "min": 0.0, "max": 10.0, "step": 0.25}),
                     "rescale": (["by percentage", "to Width/Height", 'to longer side - maintain aspect', 'None'],),
                     "percent": ("INT", {"default": 50, "min": 0, "max": 1000, "step": 1}),
